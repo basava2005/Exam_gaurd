@@ -10,6 +10,8 @@ export const violationsTable = pgTable("violations", {
   type: text("type").notNull(),
   metadata: jsonb("metadata").$type<Record<string, unknown>>(),
   timestamp: timestamp("timestamp").defaultNow().notNull(),
+  hash: text("hash"),
+  previousHash: text("previous_hash"),
 });
 
 export const insertViolationSchema = createInsertSchema(violationsTable).omit({ id: true, timestamp: true });

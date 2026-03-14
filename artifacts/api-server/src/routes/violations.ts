@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { violationsTable, studentsTable, examSessionsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, desc, asc } from "drizzle-orm";
 import { LogViolationBody } from "@workspace/api-zod";
+import crypto from "crypto";
 
 const router: IRouter = Router();
 
@@ -12,15 +13,87 @@ router.post("/violations", async (req, res) => {
     return res.status(400).json({ error: "Invalid request body" });
   }
   const { sessionId, studentId, type, metadata } = parsed.data;
+
+  // 1. Get the previous violation for this session to link the chain
+  const [lastViolation] = await db
+    .select()
+    .from(violationsTable)
+    .where(eq(violationsTable.sessionId, sessionId))
+    .orderBy(desc(violationsTable.id))
+    .limit(1);
+
+  const previousHash = lastViolation?.hash || "0000000000000000000000000000000000000000000000000000000000000000";
+
+  // 2. Calculate SHA-256 hash for the current violation (the "Block")
+  const dataToHash = JSON.stringify({
+    sessionId,
+    studentId,
+    type,
+    metadata,
+    previousHash,
+  });
+  
+  const currentHash = crypto.createHash("sha256").update(dataToHash).digest("hex");
+
+  // 3. Store the violation with its hash and link to the previous one
   const [violation] = await db.insert(violationsTable).values({
     sessionId,
     studentId,
     type,
     metadata: (metadata as Record<string, unknown>) ?? null,
+    hash: currentHash,
+    previousHash: previousHash,
   }).returning();
+
   return res.status(201).json({
     ...violation,
     timestamp: violation.timestamp.toISOString(),
+  });
+});
+
+router.get("/violations/sessions/:sessionId/verify", async (req, res) => {
+  const sessionId = parseInt(req.params.sessionId);
+  if (isNaN(sessionId)) return res.status(400).json({ error: "Invalid session ID" });
+  
+  const violations = await db
+    .select()
+    .from(violationsTable)
+    .where(eq(violationsTable.sessionId, sessionId))
+    .orderBy(asc(violationsTable.id));
+    
+  let isValid = true;
+  let corruptedIndex = -1;
+  
+  for (let i = 0; i < violations.length; i++) {
+    const v = violations[i];
+    const prevHash = i === 0 
+      ? "0000000000000000000000000000000000000000000000000000000000000000" 
+      : violations[i-1].hash;
+      
+    // Re-calculate hash to verify
+    const dataToHash = JSON.stringify({
+      sessionId: v.sessionId,
+      studentId: v.studentId,
+      type: v.type,
+      metadata: v.metadata,
+      previousHash: prevHash,
+    });
+    
+    const calculatedHash = crypto.createHash("sha256").update(dataToHash).digest("hex");
+    
+    if (calculatedHash !== v.hash || v.previousHash !== prevHash) {
+      isValid = false;
+      corruptedIndex = i;
+      break;
+    }
+  }
+  
+  return res.json({
+    isValid,
+    totalRecords: violations.length,
+    corruptedIndex: corruptedIndex !== -1 ? corruptedIndex : null,
+    status: isValid ? "Verified" : "Tampered",
+    timestamp: new Date().toISOString()
   });
 });
 

@@ -4,6 +4,17 @@ import { Card, Button, Input, Badge } from "@/components/ui";
 import { useAuth } from "@/hooks/use-auth";
 import { useQuery } from "@tanstack/react-query";
 import { useAuditorSignIn, useAuditorSignUp, useGetAuditorExams, useGetAuditorSessions, useGetStudentLogs, customFetch } from "@workspace/api-client-react";
+
+// Hook for session verification
+function useGetSessionVerification(sessionId: number, options?: any) {
+  return useQuery({
+    queryKey: ["violations", "verify", sessionId],
+    queryFn: () => customFetch(`/api/violations/sessions/${sessionId}/verify`),
+    enabled: !!sessionId,
+    ...options
+  });
+}
+
 import { format } from "date-fns";
 import { Search, ShieldAlert, MonitorOff, Keyboard, MousePointerClick, ChevronRight, X, User, LogIn, UserPlus, LogOut, CheckCircle2, Download, FileText, FileDown, Clock, Mic } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -382,6 +393,11 @@ function StudentLogPanel({ sessionId, studentName, usn, onClose }: { sessionId: 
     refetchInterval: 3000,
   });
 
+  const { data: verificationData } = useGetSessionVerification(sessionId, {
+    refetchInterval: 3000,
+    enabled: !!data?.violations?.length
+  });
+
   const getIcon = (type: string) => {
     switch (type) {
       case "TAB_SWITCH": return <MonitorOff className="w-4 h-4 text-amber-500" />;
@@ -429,7 +445,17 @@ function StudentLogPanel({ sessionId, studentName, usn, onClose }: { sessionId: 
 
       <div className="flex-1 overflow-y-auto p-6 bg-slate-50/50 dark:bg-slate-950/50">
         <div className="flex items-center justify-between mb-8">
-          <h4 className="font-bold text-xs uppercase tracking-[0.2em] text-muted-foreground/70">Violation Timeline</h4>
+          <div className="flex flex-col gap-1">
+            <h4 className="font-bold text-xs uppercase tracking-[0.2em] text-muted-foreground/70">Violation Timeline</h4>
+            {verificationData && (
+              <div className="flex items-center gap-1.5 mt-1">
+                <div className={`w-1.5 h-1.5 rounded-full ${verificationData.isValid ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+                <span className={`text-[10px] font-bold uppercase tracking-wider ${verificationData.isValid ? 'text-emerald-600' : 'text-rose-600'}`}>
+                  Blockchain {verificationData.status}
+                </span>
+              </div>
+            )}
+          </div>
           <Badge variant="outline" className="font-mono text-[10px]">{data?.violations?.length || 0} Events</Badge>
         </div>
 
@@ -460,9 +486,19 @@ function StudentLogPanel({ sessionId, studentName, usn, onClose }: { sessionId: 
                       {format(new Date(v.timestamp), "HH:mm:ss")}
                     </Badge>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground bg-slate-50 dark:bg-slate-950/50 p-3 rounded-xl border border-slate-100 dark:border-slate-900 font-medium">
-                    <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
-                    {formatMetadata(v)}
+                  <div className="flex flex-col gap-3">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground bg-slate-50 dark:bg-slate-950/50 p-3 rounded-xl border border-slate-100 dark:border-slate-900 font-medium">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary/40" />
+                      {formatMetadata(v)}
+                    </div>
+                    {v.hash && (
+                      <div className="px-3 py-2 bg-slate-50/50 dark:bg-slate-900/50 rounded-lg border border-dashed border-slate-200 dark:border-slate-800">
+                        <div className="flex items-center justify-between gap-4">
+                          <span className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-widest">Integrity Hash</span>
+                          <span className="text-[9px] font-mono text-muted-foreground/50 truncate max-w-[120px]">{v.hash}</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
