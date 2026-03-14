@@ -39,64 +39,87 @@ router.post("/signin", async (req, res) => {
 });
 
 router.get("/sessions", async (req, res) => {
-  const examIdParam = req.query.examId;
-  const examId = examIdParam ? parseInt(examIdParam as string) : undefined;
+  try {
+    const examIdParam = req.query.examId;
+    let examId: number | undefined = undefined;
+    
+    if (examIdParam && examIdParam !== "undefined" && examIdParam !== "null") {
+      const parsed = parseInt(examIdParam as string);
+      if (!isNaN(parsed)) {
+        examId = parsed;
+      }
+    }
 
-  const sessions = await db
-    .select({
-      sessionId: examSessionsTable.id,
-      studentId: studentsTable.id,
-      usn: studentsTable.usn,
-      studentName: studentsTable.studentName,
-      examId: examsTable.id,
-      examTitle: examsTable.title,
-      joinCode: examsTable.joinCode,
-      status: examSessionsTable.status,
-      joinedAt: examSessionsTable.joinedAt,
-    })
-    .from(examSessionsTable)
-    .innerJoin(studentsTable, eq(examSessionsTable.studentId, studentsTable.id))
-    .innerJoin(examsTable, eq(examSessionsTable.examId, examsTable.id))
-    .where(examId ? eq(examSessionsTable.examId, examId) : undefined);
+    const sessions = await db
+      .select({
+        sessionId: examSessionsTable.id,
+        studentId: studentsTable.id,
+        usn: studentsTable.usn,
+        studentName: studentsTable.studentName,
+        examId: examsTable.id,
+        examTitle: examsTable.title,
+        joinCode: examsTable.joinCode,
+        status: examSessionsTable.status,
+        joinedAt: examSessionsTable.joinedAt,
+      })
+      .from(examSessionsTable)
+      .innerJoin(studentsTable, eq(examSessionsTable.studentId, studentsTable.id))
+      .innerJoin(examsTable, eq(examSessionsTable.examId, examsTable.id))
+      .where(examId !== undefined ? eq(examSessionsTable.examId, examId) : undefined);
 
-  const enriched = await Promise.all(
-    sessions.map(async (s) => {
-      const violations = await db
-        .select()
-        .from(violationsTable)
-        .where(eq(violationsTable.sessionId, s.sessionId));
+    const enriched = await Promise.all(
+      sessions.map(async (s) => {
+        try {
+          const violations = await db
+            .select()
+            .from(violationsTable)
+            .where(eq(violationsTable.sessionId, s.sessionId));
 
-      const tabSwitches = violations.filter(v => v.type === "TAB_SWITCH").length;
-      const windowResizes = violations.filter(v => v.type === "WINDOW_RESIZE").length;
-      const keyboardAttempts = violations.filter(v => v.type === "KEYBOARD_ATTEMPT").length;
-      const idleDetections = violations.filter(v => v.type === "IDLE_DETECTED").length;
-      const multiVoiceDetections = violations.filter(v => v.type === "MULTIPLE_VOICES_DETECTED").length;
+          const tabSwitches = violations.filter(v => v.type === "TAB_SWITCH").length;
+          const windowResizes = violations.filter(v => v.type === "WINDOW_RESIZE").length;
+          const keyboardAttempts = violations.filter(v => v.type === "KEYBOARD_ATTEMPT").length;
+          const idleDetections = violations.filter(v => v.type === "IDLE_DETECTED").length;
+          const multiVoiceDetections = violations.filter(v => v.type === "MULTIPLE_VOICES_DETECTED").length;
 
-      let trustScore = 100;
-      trustScore -= tabSwitches * 10;
-      trustScore -= windowResizes * 5;
-      trustScore -= keyboardAttempts * 15;
-      trustScore -= idleDetections * 5;
-      trustScore -= multiVoiceDetections * 10; // Penalty of 10 for overlapping voices
-      trustScore = Math.max(0, trustScore);
+          let trustScore = 100;
+          trustScore -= tabSwitches * 10;
+          trustScore -= windowResizes * 5;
+          trustScore -= keyboardAttempts * 15;
+          trustScore -= idleDetections * 5;
+          trustScore -= multiVoiceDetections * 10;
+          trustScore = Math.max(0, trustScore);
 
-      return {
-        ...s,
-        joinedAt: s.joinedAt.toISOString(),
-        trustScore,
-        violationCount: violations.length,
-        violationBreakdown: {
-          tabSwitches,
-          windowResizes,
-          keyboardAttempts,
-          idleDetections,
-          multiVoiceDetections,
+          return {
+            ...s,
+            joinedAt: s.joinedAt.toISOString(),
+            trustScore,
+            violationCount: violations.length,
+            violationBreakdown: {
+              tabSwitches,
+              windowResizes,
+              keyboardAttempts,
+              idleDetections,
+              multiVoiceDetections,
+            }
+          };
+        } catch (err) {
+          console.error(`Error enriching session ${s.sessionId}:`, err);
+          return {
+            ...s,
+            joinedAt: s.joinedAt.toISOString(),
+            trustScore: 100,
+            violationCount: 0,
+            violationBreakdown: {}
+          };
         }
-      };
-    })
-  );
+      })
+    );
 
-  return res.json({ sessions: enriched });
+    return res.json({ sessions: enriched });
+  } catch (err) {
+    console.error("Error in /sessions route:", err);
+    return res.status(500).json({ error: "Internal Server Error", sessions: [] });
+  }
 });
 
 router.get("/exams", async (_req, res) => {
