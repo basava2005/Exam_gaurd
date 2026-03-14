@@ -106,13 +106,13 @@ router.get("/exams/:examId/sessions", async (req, res) => {
       const violations = await db
         .select()
         .from(violationsTable)
-        .where(eq(violationsTable.studentId, s.studentId));
+        .where(eq(violationsTable.sessionId, s.sessionId));
 
       const tabSwitches = violations.filter(v => v.type === "TAB_SWITCH").length;
       const windowResizes = violations.filter(v => v.type === "WINDOW_RESIZE").length;
       const keyboardAttempts = violations.filter(v => v.type === "KEYBOARD_ATTEMPT").length;
       const idleDetections = violations.filter(v => v.type === "IDLE_DETECTED").length;
-      const voiceDetections = violations.filter(v => v.type === "VOICE_DETECTED").length;
+      const multiVoiceDetections = violations.filter(v => v.type === "MULTIPLE_VOICES_DETECTED").length;
 
       let trustScore = 100;
       trustScore -= tabSwitches * 10;
